@@ -148,7 +148,6 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
       log.Printf("error on websocket. message: %s\n", err)
     }
     if c, err := gRedisConn(); err != nil {
-    if c, err := gRedisConn(); err != nil {
       log.Printf("Error on redis connection. %s\n", err)
     } else {
       config.ListenEvents(psqlInfo, c, u)
