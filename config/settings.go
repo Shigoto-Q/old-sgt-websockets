@@ -6,8 +6,10 @@ import (
   "encoding/json"
   "bytes"
   "time"
+  "github.com/gomodule/redigo/redis"
   "github.com/jmoiron/sqlx"
   "github.com/lib/pq"
+  "github.com/Shigoto/sgt-websockets/types"
 
 )
 
@@ -52,7 +54,11 @@ const (
   dbname   = "shigoto_q"
 )
 
-func waitForNotification(l *pq.Listener) {
+func publishResult(channel string, message string, conn redis.Conn) {
+  conn.Do("PUBLISH", channel, message)
+}
+
+func waitForNotification(l *pq.Listener, redisCon redis.Conn, u *types.User) {
   for {
     select {
     case n:= <-l.Notify:
@@ -63,7 +69,15 @@ func waitForNotification(l *pq.Listener) {
         log.Printf("Error processing JSON: %s", err)
         return
       }
-      fmt.Println(string(prettyJSON.Bytes()))
+      var m types.Message
+      m.DeliveryID = u.ID
+      m.Content = string(prettyJSON.Bytes())
+      fmt.Println(m.DeliveryID)
+      fmt.Println(m.Content)
+      if err := u.Conn.ReadJSON(&m); err != nil {
+        log.Printf("error on websocket. message: %s\n", err)
+      }
+      publishResult(m.DeliveryID, m.Content, redisCon)
       return
     case <-time.After(90 * time.Second):
       log.Println("Received no events for 90 seconds, checking connection")
@@ -85,20 +99,22 @@ func SetupDb() *sqlx.DB {
     if err != nil {
         log.Fatalln(err)
     }
+    return db
+}
+
+// ListenEvents to listen for database events
+func ListenEvents(psqlInfo string, redisCon redis.Conn, u *types.User) {
+    log.Println(psqlInfo)
     reportProblem := func(ev pq.ListenerEventType, err error) {
       if err != nil {
         fmt.Println(err.Error())
       }
     }
-
     listener := pq.NewListener(psqlInfo, 10*time.Second, time.Minute, reportProblem)
-    err = listener.Listen("events")
+    err := listener.Listen("events")
     if err != nil {
       panic(err)
     }
     fmt.Println("Start monitoring results")
-    for {
-      waitForNotification(listener)
-    }
-    return db
+    waitForNotification(listener, redisCon, u)
 }

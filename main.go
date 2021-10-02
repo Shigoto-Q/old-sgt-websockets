@@ -3,12 +3,14 @@ package main
 import (
   "net/http"
   "context"
+  "fmt"
   "log"
   "sync"
   "github.com/gorilla/websocket"
   "github.com/gomodule/redigo/redis"
   "github.com/satori/go.uuid"
   "github.com/Shigoto/sgt-websockets/config"
+  "github.com/Shigoto/sgt-websockets/types"
 )
 
 
@@ -20,7 +22,7 @@ type User struct {
 }
 
 type Store struct {
-  Users []*User
+  Users []*types.User
   sync.Mutex
 }
 
@@ -39,14 +41,14 @@ var (
 
 func init(){
   gStore = &Store{
-    Users: make([]*User, 0, 1),
+    Users: make([]*types.User, 0, 1),
   }
 }
 
-func (s *Store) newUser(conn *websocket.Conn) *User {
-  u := &User{
+func (s *Store) newUser(conn *websocket.Conn) *types.User {
+  u := &types.User{
     ID: uuid.NewV4().String(),
-    conn: conn,
+    Conn: conn,
   }
   if err := gPubSubConn.Subscribe(u.ID); err != nil {
     panic(err)
@@ -80,7 +82,7 @@ func (s *Store) findAndDeliver(userID, content string) {
 
   for _, u:= range s.Users{
     if u.ID == userID {
-      if err := u.conn.WriteJSON(m); err != nil {
+      if err := u.Conn.WriteJSON(m); err != nil {
         log.Printf("Error on message delivery e: %s\n", err)
       } else {
         log.Printf("User %s found, message sent\n", userID)
@@ -100,7 +102,7 @@ var serverAddress = ":8080"
 
 func main() {
   var db = config.SetupDb()
-  log.Printf("db %s", db)
+  log.Print(db)
   gRedisConn, err := gRedisConn()
   if err != nil {
     panic(err)
@@ -120,7 +122,19 @@ var upgrader = websocket.Upgrader{
   },
 }
 
+
+const (
+  host     = "postgres"
+  port     = 5432
+  user     = "debug"
+  password = "debug"
+  dbname   = "shigoto_q"
+)
+
 func wsHandler(w http.ResponseWriter, r *http.Request) {
+  psqlInfo := fmt.Sprintf("host=%s port=%d user=%s "+
+    "password=%s dbname=%s sslmode=disable",
+    host, port, user, password, dbname)
   conn, err := upgrader.Upgrade(w, r, nil)
   if err != nil {
     log.Printf("upgrader error %s\n" + err.Error())
@@ -130,12 +144,14 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
   log.Printf("user %s has connected\n", u.ID)
   for {
     var m Message
-    if err := u.conn.ReadJSON(&m); err != nil {
+    if err := u.Conn.ReadJSON(&m); err != nil {
       log.Printf("error on websocket. message: %s\n", err)
     }
     if c, err := gRedisConn(); err != nil {
+    if c, err := gRedisConn(); err != nil {
       log.Printf("Error on redis connection. %s\n", err)
     } else {
+      config.ListenEvents(psqlInfo, c, u)
       c.Do("PUBLISH", m.DeliveryID, string(m.Content))
     }
   }
