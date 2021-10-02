@@ -8,7 +8,9 @@ import (
   "github.com/gorilla/websocket"
   "github.com/gomodule/redigo/redis"
   "github.com/satori/go.uuid"
+  "github.com/Shigoto/sgt-websockets/config"
 )
+
 
 var ctx = context.Background()
 
@@ -31,7 +33,7 @@ var (
   gStore *Store
   gPubSubConn *redis.PubSubConn
   gRedisConn = func() (redis.Conn, error){
-    return redis.Dial("tcp", ":6379")
+    return redis.Dial("tcp", "redis:6379")
   }
 )
 
@@ -97,6 +99,8 @@ func publishResult(channel string, message string, conn *redis.PubSubConn) {
 var serverAddress = ":8080"
 
 func main() {
+  var db = config.SetupDb()
+  log.Printf("db %s", db)
   gRedisConn, err := gRedisConn()
   if err != nil {
     panic(err)
